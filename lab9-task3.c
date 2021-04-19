@@ -5,28 +5,34 @@
 #include <stdio.h>
 #include <sys/sem.h>
 
-// decreasing
-int P(int semid, struct sembuf* buffer) {
-    buffer->sem_num = 0;
-    buffer->sem_op = -1;
-    buffer->sem_flg = 0;
-    return semop(semid, buffer, 1);
+void try_semop(int sem_id, int val) {
+  struct sembuf mybuf;
+  mybuf.sem_num = 0;
+  mybuf.sem_op  = val;
+  mybuf.sem_flg = 0;
+  if (semop(sem_id, &mybuf, 1) < 0) {
+    printf("Can\'t wait for condition\n");
+    exit(-1);
+  }
+}
+// увеличение семафора
+void A(int sem_id, int val) {
+  try_semop(sem_id, val);
+}
+// уменьшение семафора
+void D(int sem_id, int val) {
+  try_semop(sem_id, -val);
+}
+// сравнение на 0
+void Z(int sem_id) {
+  try_semop(sem_id, 0);
 }
 
-// increasing
-int V(int semid, struct sembuf* buffer) {
-    buffer->sem_num = 0;
-    buffer->sem_op = 1;
-    buffer->sem_flg = 0;
-    return semop(semid, buffer, 1);
-}
+// Родитель делает D(1), чтобы написать своё предложение. Реёбнок Z (проверка нулю), и увеличивает сем. на 2.
+// Для того, чтобы в семафоре опять было 0, нужно чтобы родитель зашёл в цикл и вышел из него.
 
 int main()
 {
-    // семафор = 0
-    // P - уменьшает на 1
-    // V - увеличивает на 1
-
     struct sembuf mybuf;
     int semid;
 
@@ -50,18 +56,31 @@ int main()
         exit(-1);
     }
 
-    if ((semid = semget(key, 1, 0666)) < 0) {
-        // создаю семафор
-        printf("No semaphore found. Creating... \n");
-        if ((semid = semget(key, 1, 0666 | IPC_CREAT)) < 0) {
-            printf("Can't get semid \n");
-            exit(-1);
+    if ((semid = semget(key, 1, 0666|IPC_CREAT|IPC_EXCL)) < 0) {
+        if (errno != EEXIST) {
+        	printf("Can\'t create semaphore set\n");
+        	exit(-1);
+        } else if ((semid = semget(key, 1, 0)) < 0) {
+        	printf("Can\'t find semaphore\n");
+        	exit(-1);
         }
-        printf("Successfully created semaphore! \n");
+    } else {
+        A(semid, 2);
     }
+    // создал семафор
 
+    int N;
+    printf("Enter N: \n");
+    scanf("%d", &N);
+	
+    while (N < 2) {
+        printf("N must be greater or equal to 2 \n");
+	printf("Enter N: \n");
+	scanf("%d", &N);
+    }
+    
     result = fork();
-
+	
     if (result < 0) {
         printf("Couldn't fork child! \n");
         exit(-1);
@@ -69,70 +88,55 @@ int main()
     else if (result > 0) {
 	// логика отца
 
-        int N;
-        printf("Enter N: \n");
-        scanf("%d", &N);
-
-        while (N < 2) {
-            printf("N must be greater or equal to 2 \n");
-            printf("Enter N: \n");
-            scanf("%d", &N);
-        }
-
         for (size_t i = 0; i < N; i++)
         {
+            D(semid, 1);
+		
+            if (i != 0) {
+                size = read(fd[0], resstring, 14);
+                if (size < 0) {
+			printf("Can\'t read string \n");
+                	exit(-1);
+                }
+                printf("N = %d, parent read message: %s \n", i, resstring);
+            }
+
             size = write(fd[1], "Hello, world!", 14);
-            // пишу ребёнку
+            
             if (size != 14) {
-                printf("Can\'t write all string \n");
+                printf("Can\'t write all string to pipe\n");
                 exit(-1);
-            } else{
-		printf("N = %d, parent wrote to child \n", i + 1);
-	    }
-
-	    // передаём эстафету ребёнку
-            V(semid, &mybuf);
-            P(semid, &mybuf);
-
-            size = read(fd[0], resstring, 14);
-	    // теперь родитель читает ребёнка 
-            if (size != 14) {
-                printf("Can\'t read from child \n");
-                exit(-1);
-            } else{
-            	printf("N = %d, parent read from child = %s\n", i + 1, resstring);
-	    }
+            }
+		
+            D(semid, 1);
         }
         close(fd[0]);
-        close(fd[1]);
     }
     else {
         // номер ребёнка
         int cnt = 0;
-
-        while(1) {
-            P(semid, &mybuf);
+	
+	for (int i = 0; i < N; ++i) {
+            Z(semid);
 
             size = read(fd[0], resstring, 14);
-	    printf("N = %d, child read: %s\n", ++cnt, resstring);
-            // читаем родителя
-
             if (size < 0) {
-		break;
-            }
- 	    
-            // пишем родителю
-            if (write(fd[1], "Hello, parent", 14) != 14) {
-                printf("Can\'t write all string. \n");
+                printf("Can\'t read string \n");
                 exit(-1);
             }
- 
-            // теперь передаём эстафету родителю
-            V(semid, &mybuf); 
+		
+            printf("N = %d, child read message: %s \n", ++cnt, resstring);
+
+            size = write(fd[1], "Hello, parent", 14);
+            if (size != 14) {
+                printf("Can't write string %d \n", size);
+                exit(-1);
+            }
+
+            A(semid, 2);
         }
         close(fd[1]);
         close(fd[0]);
-        printf("End program.\n");
     }
     return 0;
 }
