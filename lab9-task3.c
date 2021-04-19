@@ -4,6 +4,7 @@
 #include <unistd.h>
 #include <stdio.h>
 #include <sys/sem.h>
+#include <errno.h>
 
 void try_semop(int sem_id, int val) {
   struct sembuf mybuf;
