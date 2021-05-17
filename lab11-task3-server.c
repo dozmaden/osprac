@@ -53,10 +53,15 @@ int main() {
 
     while (1) {
         int maxlen = sizeof(clientbuf.info);
-        if (msgrcv(msqid, (struct clientbuf *) &clientbuf, maxlen, 1, 0) < 0) {
+        if (msgrcv(msqid, (struct clientbuf *) &clientbuf, maxlen, -2, 0) < 0) {
             printf("Can't receive message from queue\n");
             exit(-1);
         }
+
+	if(clientbuf.mtype == 2){
+		printf("Program killed!");
+		exit(-1);
+	}
 
         printf("%d client sent this: %f \n", clientbuf.info.pid, clientbuf.info.msg);
 
