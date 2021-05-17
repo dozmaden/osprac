@@ -5,6 +5,8 @@
 #include <sys/types.h>
 #include <sys/ipc.h>
 #include <sys/msg.h>
+#include <sys/file.h>
+#include <errno.h>
 
 struct server
 {
@@ -28,6 +30,16 @@ int main() {
     char pathname[] = "lab11-task3-server.c";
     int msqid;
     key_t key;
+
+    int pid_file = open("lab11-task3-server.c", O_CREAT | O_RDWR, 0666);
+    int rc = flock(pid_file, LOCK_EX | LOCK_NB);
+
+    if (rc){
+	if(EWOULDBLOCK == errno){
+		printf("Another instance is running! \n");
+		exit(-1);
+	}
+    }
 
     if ((key = ftok(pathname, 0)) < 0) {
         printf("Can't generate key\n");
